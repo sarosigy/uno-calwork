@@ -1,4 +1,5 @@
-image: unoplatform/wasm-build:2.1.1
+#image: unoplatform/wasm-build:2.1.1
+image: .gitpod.Dockerfile
 
 ports:
   # Default port for the SampleApp
@@ -11,7 +12,7 @@ ports:
 tasks:
   # This task is run during pre-build and it's log and built results are
   # restored as part of the workspace initialization.
-  - prebuild: build/gitpod/build-wasm.sh
+  - init: build/gitpod/build-wasm.sh
     command: export NUGET_PACKAGES=/workspace/.nuget
 
   - name: XAML Hot Reload Server
