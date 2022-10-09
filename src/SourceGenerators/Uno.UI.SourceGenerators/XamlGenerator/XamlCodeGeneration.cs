@@ -19,6 +19,7 @@ using __uno::Uno.Xaml;
 using Microsoft.CodeAnalysis.Text;
 using System.Threading.Tasks;
 using System.Threading;
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 
 #if NETFRAMEWORK
@@ -278,6 +279,24 @@ namespace Uno.UI.SourceGenerators.XamlGenerator
 				var resourceKeys = GetResourceKeys(_generatorContext.CancellationToken);
 				var filesFull = new XamlFileParser(_excludeXamlNamespaces, _includeXamlNamespaces, _metadataHelper)
 					.ParseFiles(_xamlSourceFiles, _generatorContext.CancellationToken);
+
+				var xamlTypeToXamlTypeBaseMap = new ConcurrentDictionary<INamedTypeSymbol, XamlRedirection.XamlType>();
+				Parallel.ForEach(filesFull, file =>
+				{
+					var topLevelControl = file.Objects.FirstOrDefault();
+					if (topLevelControl is null)
+					{
+						return;
+					}
+
+					var xClassSymbol = XamlFileGenerator.FindClassSymbol(topLevelControl, _metadataHelper);
+					if (xClassSymbol is not null)
+					{
+						xamlTypeToXamlTypeBaseMap.TryAdd(xClassSymbol, topLevelControl.Type);
+					}
+				});
+
+
 				var files = filesFull
 					.Trim()
 					.OrderBy(f => f.UniqueID)
@@ -326,7 +345,8 @@ namespace Uno.UI.SourceGenerators.XamlGenerator
 									isLazyVisualStateManagerEnabled: _isLazyVisualStateManagerEnabled,
 									generatorContext: _generatorContext,
 									xamlResourcesTrimming: _xamlResourcesTrimming,
-									generationRunFileInfo: generationRunInfo.GetRunFileInfo(file.UniqueID)
+									generationRunFileInfo: generationRunInfo.GetRunFileInfo(file.UniqueID),
+									xamlTypeToXamlTypeBaseMap: xamlTypeToXamlTypeBaseMap
 								)
 								.GenerateFile()
 						)
@@ -588,12 +608,14 @@ namespace Uno.UI.SourceGenerators.XamlGenerator
 						var doc = new XmlDocument();
 						doc.LoadXml(sourceText.ToString());
 
+						var rewriterBuilder = new StringBuilder();
+
 						//extract all localization keys from Win10 resource file
 						// https://docs.microsoft.com/en-us/dotnet/standard/data/xml/compiled-xpath-expressions?redirectedfrom=MSDN#higher-performance-xpath-expressions
 						// Per this documentation, /root/data should be more performant than //data
 						var keys = doc.SelectNodes("/root/data")
 							?.Cast<XmlElement>()
-							.Select(node => node.GetAttribute("name"))
+							.Select(node => RewriteResourceKeyName(rewriterBuilder, node.GetAttribute("name")))
 							.ToArray() ?? Array.Empty<string>();
 						_cachedResources[cachedFileKey] = new CachedResource(DateTimeOffset.Now, keys);
 						return keys;
@@ -616,13 +638,29 @@ namespace Uno.UI.SourceGenerators.XamlGenerator
 #endif
 					}
 				})
-				.Select(k => k.Replace('.', '/'))
+				.Distinct()
 				.ToImmutableHashSet();
 
 #if DEBUG
 			Console.WriteLine(resourceKeys.Count + " localization keys found");
 #endif
 			return resourceKeys;
+		}
+
+		private string RewriteResourceKeyName(StringBuilder builder, string keyName)
+		{
+			var firstDotIndex = keyName.IndexOf('.');
+			if (firstDotIndex != -1)
+			{
+				builder.Clear();
+				builder.Append(keyName);
+
+				builder[firstDotIndex] = '/';
+
+				return builder.ToString();
+			}
+
+			return keyName;
 		}
 
 		private DateTime GetLastBinaryUpdateTime()
