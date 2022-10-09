@@ -1,5 +1,6 @@
 #image: unoplatform/wasm-build:2.1.1
-image: .gitpod.Dockerfile
+image:
+   file: .gitpod.Dockerfile
 
 ports:
   # Default port for the SampleApp
